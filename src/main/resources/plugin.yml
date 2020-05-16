@@ -1,5 +1,5 @@
 name: WastedJetpack
-version: @version@
+version: 1.0.1
 main: com.jerrybibo.wastedjetpack.WastedJetpack
 authors: [Jerrybibo]
 description: Wasted Jetpacks plugin.

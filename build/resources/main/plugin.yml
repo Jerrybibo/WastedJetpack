@@ -1,5 +1,5 @@
 name: WastedJetpack
-version: 1.0
+version: 1.0.1
 main: com.jerrybibo.wastedjetpack.WastedJetpack
 authors: [Jerrybibo]
 description: Wasted Jetpacks plugin.
@@ -7,4 +7,4 @@ website: jerrybibo.com
 commands:
   jetpack:
     description: Gives the player a jetpack.
-    usage: /<command>
+    usage: /<command> [durability]
