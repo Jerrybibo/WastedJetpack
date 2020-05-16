@@ -7,4 +7,4 @@ website: jerrybibo.com
 commands:
   jetpack:
     description: Gives the player a jetpack.
-    usage: /<command>
+    usage: /<command> [durability]

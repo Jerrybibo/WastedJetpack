@@ -1,9 +1,6 @@
 package com.jerrybibo.wastedjetpack;
 
-import org.bukkit.ChatColor;
-import org.bukkit.Material;
-import org.bukkit.Particle;
-import org.bukkit.Sound;
+import org.bukkit.*;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -11,15 +8,18 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 // Wasted Jetpacks
 // Last Edit: May 15, 2020
@@ -27,6 +27,7 @@ import java.util.Map;
 public final class WastedJetpack extends JavaPlugin implements Listener {
 
     private final HashMap<Player, Boolean> sneakingPlayers = new HashMap<>();
+    private final HashMap<Player, Boolean> repairingPlayers = new HashMap<>();
     // Jetpack item; preferably chainmail, iron, or gold chestplate
     private final Material JETPACK_ITEM = Material.CHAINMAIL_CHESTPLATE;
 
@@ -49,7 +50,26 @@ public final class WastedJetpack extends JavaPlugin implements Listener {
     public void onEnable() {
         System.out.println("Wasted Jetpacks by Jerrybibo — starting up");
         getServer().getPluginManager().registerEvents(this, this);
-        getServer().getScheduler().scheduleAsyncRepeatingTask(this, () -> propellJetpackPlayers((float) 1), 0, 2);
+        // Initializes HashMap values for each online player; used for /reload
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            sneakingPlayers.put(player, true);
+            repairingPlayers.put(player, false);
+        }
+        // Create a runnable to propell anyone who is wearing the jetpack and sneaking
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                propellJetpackPlayers((float) 1);
+            }
+        }.runTaskTimer(this, 0, 2);
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent e) {
+        // Initializes HashMap values for each joined player on first join
+        Player player = e.getPlayer();
+        sneakingPlayers.put(player, true);
+        repairingPlayers.put(player, false);
     }
 
     @EventHandler
@@ -67,9 +87,34 @@ public final class WastedJetpack extends JavaPlugin implements Listener {
             ItemStack currentHeldItem = player.getInventory().getItemInMainHand();
             if (currentHeldItem.getType().equals(JETPACK_ITEM) &&
                     currentHeldItem.getDurability() > 0 &&
+                    currentHeldItem.hasItemMeta() &&
                     currentHeldItem.getItemMeta().getDisplayName().equals(ChatColor.RESET +"Jetpack") &&
                     currentHeldItem.getItemMeta().hasLore()) {
-                fixJetpack(player, currentHeldItem);
+                // If the player is currently not repairing something:
+                if (!repairingPlayers.get(player)) {
+                    // Update the HashMap to indicate that the player is repairing something
+                    repairingPlayers.put(player, true);
+                    // Create a new BukkitRunnable so that the player begins to repair bit by bit
+                    new BukkitRunnable() {
+                        final ItemStack jetpack = currentHeldItem;
+                        @Override
+                        public void run() {
+                            // If the player stops holding the jetpack, stop repairing
+                            if (!jetpack.getType().equals(JETPACK_ITEM)) {
+                                repairingPlayers.put(player, false);
+                                cancel();
+                            }
+                            // If the durability hits maximum, stop repairing, otherwise continue
+                            if (jetpack.getDurability() > 0) {
+                                jetpack.setDurability((short) (jetpack.getDurability() - JETPACK_REPAIR_SPEED));
+                                player.getWorld().playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_LEATHER, (float) 0.5, 1);
+                            } else {
+                                repairingPlayers.put(player, false);
+                                cancel();
+                            }
+                        }
+                    }.runTaskTimer(this, 0, 5);
+                }
             }
         }
     }
@@ -80,18 +125,31 @@ public final class WastedJetpack extends JavaPlugin implements Listener {
         if (cmd.getName().equals("jetpack")) {
             if (sender instanceof Player) {
                 Player player = (Player) sender;
+                short durability = JETPACK_ITEM.getMaxDurability();
+                if (args.length > 0) {
+                    short durabilityArgument = Short.parseShort(args[0]);
+                    if (!(0 <= durabilityArgument && durabilityArgument <= JETPACK_ITEM.getMaxDurability())) {
+                        player.sendMessage(ChatColor.RED + "Invalid durability argument - durability must be between 0 and " + JETPACK_ITEM.getMaxDurability());
+                        return true;
+                    } else {
+                        durability = (short) (durability - Short.parseShort(args[0]));
+                    }
+                }
                 ItemStack jetpackItemStack = new ItemStack(Material.CHAINMAIL_CHESTPLATE, 1);
                 ItemMeta jetpackMeta = jetpackItemStack.getItemMeta();
+                assert jetpackMeta != null;
                 jetpackMeta.setDisplayName(ChatColor.RESET + "Jetpack");
                 jetpackMeta.setLore(Arrays.asList(ChatColor.AQUA + "Sneak while equipped to fly!",
                         ChatColor.AQUA + "Left click while holding to repair."));
                 jetpackItemStack.setItemMeta(jetpackMeta);
+                jetpackItemStack.setDurability((short) (JETPACK_ITEM.getMaxDurability() - durability));
                 player.getInventory().addItem(jetpackItemStack);
+                player.sendMessage(ChatColor.BLUE + "Here's your jetpack!");
             } else {
                 System.out.println("You must be a player to execute this command!");
             }
         }
-        return false;
+        return true;
     }
 
     public void propellJetpackPlayers(float magnitude) {
@@ -100,9 +158,10 @@ public final class WastedJetpack extends JavaPlugin implements Listener {
             if (!isSneaking.getValue()) {
                 Player player = isSneaking.getKey();
                 ItemStack chestplateItem = player.getInventory().getChestplate();
-
-                if (chestplateItem.getType().equals(JETPACK_ITEM) &&
-                        chestplateItem.getItemMeta().getDisplayName().equals(ChatColor.RESET +"Jetpack") &&
+                if (chestplateItem != null &&
+                        chestplateItem.getType().equals(JETPACK_ITEM) &&
+                        chestplateItem.hasItemMeta() &&
+                        chestplateItem.getItemMeta().getDisplayName().equals(ChatColor.RESET + "Jetpack") &&
                         chestplateItem.getItemMeta().hasLore()) {
                     if (chestplateItem.getDurability() < JETPACK_ITEM.getMaxDurability()) {
                         // Set the player velocity to allow them to fly, and reduce the chestplate durability
@@ -136,16 +195,6 @@ public final class WastedJetpack extends JavaPlugin implements Listener {
             velocity.setY(y_vel + JETPACK_Y_VELOCITY);
         }
         return velocity.multiply(magnitude);
-    }
-
-    public void fixJetpack(Player player, ItemStack jetpack) {
-        // Fix the jetpack if a player is holding the chestplate and left clicks air (See EventHandler)
-        getServer().getScheduler().scheduleAsyncRepeatingTask(this, () -> {
-            if (jetpack.getDurability() > 0) {
-                jetpack.setDurability((short) (jetpack.getDurability() - JETPACK_REPAIR_SPEED));
-                player.getWorld().playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_LEATHER, (float) 0.5, 1);
-            }
-        }, 0, 5);
     }
 
     @Override
